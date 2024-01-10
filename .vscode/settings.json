@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "cpu.h": "c",
+        "nes.h": "c",
+        "common.h": "c"
+    }
+}
