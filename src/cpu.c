@@ -1,5 +1,7 @@
 #include "cpu.h"
 
+
+
 /* cycle/tick functions */
 void cpu_cycle(struct nes *nes)
 {
@@ -34,18 +36,20 @@ static uint16_t fetch_16(struct nes *nes)
 
 void stack_push_8(struct nes *nes, uint8_t data)
 {
-    cpu_write(nes, nes->cpu.sp--, data);
+    cpu_write(nes, STACK_BASE | nes->cpu.sp, data);
+    nes->cpu.sp--;
 }
 
 void stack_push_16(struct nes *nes, uint16_t data)
 {
-    cpu_write(nes, nes->cpu.sp--, MSB(data));
-    cpu_write(nes, nes->cpu.sp--, LSB(data));
+    stack_push_8(nes, MSB(data));
+    stack_push_8(nes, LSB(data));
 }
 
 uint8_t stack_pop_8(struct nes *nes)
 {
-    return cpu_read(nes, ++nes->cpu.sp);
+    nes->cpu.sp++;
+    return cpu_read(nes, STACK_BASE + nes->cpu.sp);
 }
 
 uint16_t stack_pop_16(struct nes *nes)
@@ -121,8 +125,8 @@ static void lda(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
 }
 
 static void ldx(struct nes *nes, addr_mode_t mode)
@@ -147,8 +151,8 @@ static void ldx(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.x;
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
 }
 
 static void ldy(struct nes *nes, addr_mode_t mode)
@@ -173,8 +177,8 @@ static void ldy(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.y);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.y & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.y;
+    nes->cpu.N_FLAG = BIT(nes->cpu.y, 7);
 }
 
 static void sta(struct nes *nes, addr_mode_t mode)
@@ -226,32 +230,32 @@ static void tay(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.y = nes->cpu.a;
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.y);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.y & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.y;
+    nes->cpu.N_FLAG = BIT(nes->cpu.y, 7);
 }
 
 static void tax(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.x = nes->cpu.a;
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.x;
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
 }
 
 static void txa(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.a = nes->cpu.x;
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
 }
 
 static void tya(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.a = nes->cpu.y;
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
 }
 
 /* Stack Operations */
@@ -260,8 +264,8 @@ static void tsx(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.x = nes->cpu.sp;
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80); 
+    nes->cpu.Z_FLAG = !nes->cpu.x;
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
 }
 
 static void txs(struct nes *nes, addr_mode_t mode)
@@ -284,8 +288,8 @@ static void pla(struct nes *nes, addr_mode_t mode)
     cpu_cycle(nes);
     nes->cpu.a = stack_pop_8(nes);
 
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
 }
 
 static void plp(struct nes *nes, addr_mode_t mode)
@@ -300,13 +304,12 @@ static void and(struct nes *nes, addr_mode_t mode)
 {
     switch (mode) {
     case IMM:
-        nes->cpu.a &= nes->cpu.operation_value;
         break;
     case ZP:
     case ZPX:
     case ABS:
     case XIND:
-        nes->cpu.a &= cpu_read(nes, nes->cpu.effective_addr); 
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr); 
         break;
     case ABSX:
     case ABSY:
@@ -315,24 +318,27 @@ static void and(struct nes *nes, addr_mode_t mode)
             nes->cpu.page_boundary_crossed = false;
             nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.a &= nes->cpu.operation_value;
         break;
     default:
         break;
     }
+
+    nes->cpu.a &= nes->cpu.operation_value;
+
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void eor(struct nes *nes, addr_mode_t mode)
 {
     switch (mode) {
     case IMM:
-        nes->cpu.a ^= nes->cpu.operation_value;
         break;
     case ZP:
     case ZPX:
     case ABS:
     case XIND:
-        nes->cpu.a ^= cpu_read(nes, nes->cpu.effective_addr); 
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr); 
         break;
     case ABSX:
     case ABSY:
@@ -341,24 +347,27 @@ static void eor(struct nes *nes, addr_mode_t mode)
             nes->cpu.page_boundary_crossed = false;
             nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.a ^= nes->cpu.operation_value;
         break;
     default:
         break;
     } 
+
+    nes->cpu.a ^= nes->cpu.operation_value;
+
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void ora(struct nes *nes, addr_mode_t mode)
 {
     switch (mode) {
     case IMM:
-        nes->cpu.a |= nes->cpu.operation_value;
         break;
     case ZP:
     case ZPX:
     case ABS:
     case XIND:
-        nes->cpu.a |= cpu_read(nes, nes->cpu.effective_addr); 
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr); 
         break;
     case ABSX:
     case ABSY:
@@ -367,11 +376,15 @@ static void ora(struct nes *nes, addr_mode_t mode)
             nes->cpu.page_boundary_crossed = false;
             nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.a |= nes->cpu.operation_value;
         break;
     default:
         break;
     }
+
+    nes->cpu.a |= nes->cpu.operation_value;
+    
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void bit(struct nes *nes, addr_mode_t mode)
@@ -382,9 +395,10 @@ static void bit(struct nes *nes, addr_mode_t mode)
     case ZP:
     case ABS:
         memory = cpu_read(nes, nes->cpu.effective_addr);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(nes->cpu.a & memory));
-        ASSIGN_FLAG(nes->cpu.p, N, memory & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, V, memory & 0x40);
+
+        nes->cpu.Z_FLAG = !(nes->cpu.a & memory);
+        nes->cpu.N_FLAG = BIT(memory, 7);
+        nes->cpu.V_FLAG = BIT(memory, 6);
         break;
     default:
         break;
@@ -395,7 +409,7 @@ static void bit(struct nes *nes, addr_mode_t mode)
 
 static void adc(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp, c;
+    uint8_t a, m, c;
 
     switch (mode) {
     case IMM:
@@ -418,20 +432,20 @@ static void adc(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    tmp = nes->cpu.a;
-    c = GET_FLAG(nes->cpu.p, C);
-    nes->cpu.a += nes->cpu.operation_value + c;
+    a = nes->cpu.a;
+    c = BIT(nes->cpu.p, C);
+    m = nes->cpu.operation_value;
+    nes->cpu.a = a + m + c;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, V, 
-            (tmp ^ nes->cpu.a) & ((nes->cpu.operation_value + c) ^ nes->cpu.a) & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, C, (tmp + (uint16_t)nes->cpu.operation_value + c) & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.V_FLAG = ((a ^ nes->cpu.a) & (m ^ nes->cpu.a) & 0x80) > 0;
+    nes->cpu.C_FLAG = ((a + m + c) & 0x100) > 0;
 }
 
 static void sbc(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp, c, m;
+    uint8_t a, c, m;
 
     switch (mode) {
     case IMM:
@@ -454,22 +468,19 @@ static void sbc(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    tmp = nes->cpu.a;
-    c = GET_FLAG(nes->cpu.p, C);
+    a = nes->cpu.a;
+    c = BIT(nes->cpu.p, C);
     m = nes->cpu.operation_value ^ 0xff;
     nes->cpu.a += (nes->cpu.operation_value ^ 0xff) + c;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, V, 
-            (tmp ^ nes->cpu.a) & ((m + c) ^ nes->cpu.a) & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, C, (tmp + m + c) & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.V_FLAG = ((a ^ nes->cpu.a) & (m ^ nes->cpu.a) & 0x80) > 0;
+    nes->cpu.C_FLAG = ((a + m + c) & 0x100) > 0;
 }
 
 static void cmp(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp;
-
     switch (mode) {
     case IMM:
         break;
@@ -491,16 +502,13 @@ static void cmp(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    tmp = (uint16_t)nes->cpu.a - (uint16_t)nes->cpu.operation_value;
-    ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-    ASSIGN_FLAG(nes->cpu.p, C, tmp & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a - nes->cpu.operation_value, 7);
+    nes->cpu.Z_FLAG = !(nes->cpu.a - nes->cpu.operation_value);
+    nes->cpu.C_FLAG = nes->cpu.a >= nes->cpu.operation_value;
 }
 
 static void cpx(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp;
-
     switch (mode) {
     case IMM:
         break;
@@ -512,16 +520,13 @@ static void cpx(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    tmp = (uint16_t)nes->cpu.x - (uint16_t)nes->cpu.operation_value;
-    ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-    ASSIGN_FLAG(nes->cpu.p, C, tmp & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.x - nes->cpu.operation_value, 7);
+    nes->cpu.Z_FLAG = !(nes->cpu.x - nes->cpu.operation_value);
+    nes->cpu.C_FLAG = nes->cpu.x >= nes->cpu.operation_value;
 }
 
 static void cpy(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp;
-
     switch (mode) {
     case IMM:
         break;
@@ -533,10 +538,9 @@ static void cpy(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    tmp = (uint16_t)nes->cpu.y - (uint16_t)nes->cpu.operation_value;
-    ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-    ASSIGN_FLAG(nes->cpu.p, C, tmp & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.y - nes->cpu.operation_value, 7);
+    nes->cpu.Z_FLAG = !(nes->cpu.y - nes->cpu.operation_value);
+    nes->cpu.C_FLAG = nes->cpu.y >= nes->cpu.operation_value;
 }
 
 /* Increments & Decrements */
@@ -557,24 +561,24 @@ static void inc(struct nes *nes, addr_mode_t mode)
     cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
     cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value + 1);
 
-    ASSIGN_FLAG(nes->cpu.p, N, (nes->cpu.operation_value + 1) & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !(nes->cpu.operation_value + 1));
+    nes->cpu.N_FLAG = BIT(nes->cpu.operation_value + 1, 7);
+    nes->cpu.Z_FLAG = !((nes->cpu.operation_value + 1) & 0xff);
 }
 
 static void inx(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.x += 1;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.x;
 }
 
 static void iny(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.y += 1;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.y & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.y);
+    nes->cpu.N_FLAG = BIT(nes->cpu.y, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.y;
 }
 
 static void dec(struct nes *nes, addr_mode_t mode)
@@ -593,41 +597,40 @@ static void dec(struct nes *nes, addr_mode_t mode)
     cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
     cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value - 1);
 
-    ASSIGN_FLAG(nes->cpu.p, N, (nes->cpu.operation_value - 1) & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !(nes->cpu.operation_value - 1));
+    nes->cpu.N_FLAG = BIT(nes->cpu.operation_value - 1, 7);
+    nes->cpu.Z_FLAG = !((nes->cpu.operation_value - 1) & 0xff);
 }
 
 static void dex(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.x -= 1;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.x;
 }
 
 static void dey(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.y -= 1;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.y & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.y);
+    nes->cpu.N_FLAG = BIT(nes->cpu.y, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.y;
 }
 
 /* shifts */
 
 static void asl(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t new_c;
-    uint16_t tmp;
+    uint8_t new_c, tmp;
 
     switch (mode) {
     case ACC:
-        new_c = nes->cpu.a & 0x80;
+        new_c = BIT(nes->cpu.a, 7);
         nes->cpu.a <<= 1;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     case ZP:
     case ZPX:
@@ -635,13 +638,13 @@ static void asl(struct nes *nes, addr_mode_t mode)
     case ABSX:
         tmp = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, tmp);
-        new_c = tmp & 0x80;
+        new_c = BIT(tmp, 7);
         tmp <<= 1;
         cpu_write(nes, nes->cpu.effective_addr, tmp);
 
-        ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(tmp, 7);
+        nes->cpu.Z_FLAG = !tmp;
+        nes->cpu.C_FLAG = new_c > 0;
     default:
         break;
     }
@@ -649,17 +652,16 @@ static void asl(struct nes *nes, addr_mode_t mode)
 
 static void lsr(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t new_c;
-    uint16_t tmp;
+    uint8_t new_c, tmp;
 
     switch (mode) {
     case ACC:
-        new_c = nes->cpu.a & 0x01;
+        new_c = BIT(nes->cpu.a, 0);
         nes->cpu.a >>= 1;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     case ZP:
     case ZPX:
@@ -667,13 +669,13 @@ static void lsr(struct nes *nes, addr_mode_t mode)
     case ABSX:
         tmp = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, tmp);
-        new_c = tmp & 0x01;
+        new_c = BIT(tmp, 0);
         tmp >>= 1;
         cpu_write(nes, nes->cpu.effective_addr, tmp);
 
-        ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(tmp, 7);
+        nes->cpu.Z_FLAG = !tmp;
+        nes->cpu.C_FLAG = new_c > 0;
     default:
         break;
     }
@@ -681,17 +683,17 @@ static void lsr(struct nes *nes, addr_mode_t mode)
 
 static void rol(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t new_c;
-    uint16_t tmp;
+    uint8_t new_c, old_c, tmp;
 
+    old_c = BIT(nes->cpu.p, C);
     switch (mode) {
     case ACC:
-        new_c = nes->cpu.a & 0x80;
-        nes->cpu.a = (nes->cpu.a << 1) | (new_c >> 7);
+        new_c = BIT(nes->cpu.a, 7);
+        nes->cpu.a = (nes->cpu.a << 1) | old_c;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     case ZP:
     case ZPX:
@@ -699,13 +701,13 @@ static void rol(struct nes *nes, addr_mode_t mode)
     case ABSX:
         tmp = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, tmp);
-        new_c = tmp & 0x80;
-        tmp = (tmp << 1) | (new_c >> 7);
+        new_c = BIT(tmp, 7);
+        tmp = (tmp << 1) | old_c;
         cpu_write(nes, nes->cpu.effective_addr, tmp);
 
-        ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(tmp, 7);
+        nes->cpu.Z_FLAG = !tmp;
+        nes->cpu.C_FLAG = new_c > 0;
     default:
         break;
     }
@@ -713,17 +715,17 @@ static void rol(struct nes *nes, addr_mode_t mode)
 
 static void ror(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t new_c;
-    uint16_t tmp;
+    uint8_t new_c, tmp, old_c;
 
+    old_c = BIT(nes->cpu.p, C);
     switch (mode) {
     case ACC:
-        new_c = nes->cpu.a & 0x01;
-        nes->cpu.a = (nes->cpu.a >> 1) | (new_c << 7);
+        new_c = BIT(nes->cpu.a, 0);
+        nes->cpu.a = (nes->cpu.a >> 1) | (old_c << 7);
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     case ZP:
     case ZPX:
@@ -731,13 +733,13 @@ static void ror(struct nes *nes, addr_mode_t mode)
     case ABSX:
         tmp = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, tmp);
-        new_c = tmp & 0x01;
-        tmp = (tmp >> 1) | (new_c << 7);
+        new_c = BIT(tmp, C);
+        tmp = (tmp >> 1) | (old_c << 7);
         cpu_write(nes, nes->cpu.effective_addr, tmp);
 
-        ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(tmp & 0xff));
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(tmp, 7);
+        nes->cpu.Z_FLAG = !tmp;
+        nes->cpu.C_FLAG = new_c > 0;
     default:
         break;
     }
@@ -752,11 +754,14 @@ static void jmp(struct nes *nes, addr_mode_t mode)
 static void jsr(struct nes *nes, addr_mode_t mode)
 {
     stack_push_16(nes, nes->cpu.pc);
-    nes->cpu.pc = ((uint16_t)cpu_read(nes, nes->cpu.pc) << 8) | nes->cpu.operand[0];
+    nes->cpu.pc = TO_U16(nes->cpu.operand[0], cpu_read(nes, nes->cpu.pc));
 }
 
 static void rts(struct nes *nes, addr_mode_t mode)
 {
+    // TODO: all NES instruction cycles are either read or write 
+    //       to memory. Change all cpu_cycle() inside instructions
+    //       to corresponding read/write memory.
     cpu_cycle(nes);
     nes->cpu.pc = stack_pop_16(nes);
     cpu_cycle(nes);
@@ -767,7 +772,7 @@ static void rts(struct nes *nes, addr_mode_t mode)
 
 static void bcc(struct nes *nes, addr_mode_t mode)
 {
-    if (!GET_FLAG(nes->cpu.p, C)) {
+    if (!BIT(nes->cpu.p, C)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -778,7 +783,7 @@ static void bcc(struct nes *nes, addr_mode_t mode)
 
 static void bcs(struct nes *nes, addr_mode_t mode)
 {
-    if (GET_FLAG(nes->cpu.p, C)) {
+    if (BIT(nes->cpu.p, C)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -789,7 +794,7 @@ static void bcs(struct nes *nes, addr_mode_t mode)
 
 static void beq(struct nes *nes, addr_mode_t mode)
 {
-    if (GET_FLAG(nes->cpu.p, Z)) {
+    if (BIT(nes->cpu.p, Z)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -800,7 +805,7 @@ static void beq(struct nes *nes, addr_mode_t mode)
 
 static void bmi(struct nes *nes, addr_mode_t mode)
 {
-    if (GET_FLAG(nes->cpu.p, N)) {
+    if (BIT(nes->cpu.p, N)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -811,7 +816,7 @@ static void bmi(struct nes *nes, addr_mode_t mode)
 
 static void bne(struct nes *nes, addr_mode_t mode)
 {
-    if (!GET_FLAG(nes->cpu.p, Z)) {
+    if (!BIT(nes->cpu.p, Z)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -822,7 +827,7 @@ static void bne(struct nes *nes, addr_mode_t mode)
 
 static void bpl(struct nes *nes, addr_mode_t mode)
 {
-    if (!GET_FLAG(nes->cpu.p, N)) {
+    if (!BIT(nes->cpu.p, N)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -833,7 +838,7 @@ static void bpl(struct nes *nes, addr_mode_t mode)
 
 static void bvc(struct nes *nes, addr_mode_t mode)
 {
-    if (!GET_FLAG(nes->cpu.p, V)) {
+    if (!BIT(nes->cpu.p, V)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -844,7 +849,7 @@ static void bvc(struct nes *nes, addr_mode_t mode)
 
 static void bvs(struct nes *nes, addr_mode_t mode)
 {
-    if (GET_FLAG(nes->cpu.p, V)) {
+    if (BIT(nes->cpu.p, V)) {
         nes->cpu.pc = nes->cpu.effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
@@ -857,37 +862,37 @@ static void bvs(struct nes *nes, addr_mode_t mode)
 
 static void clc(struct nes *nes, addr_mode_t mode)
 {
-    RESET_FLAG(nes->cpu.p, C);
+    nes->cpu.C_FLAG = 0;
 }
 
 static void cld(struct nes *nes, addr_mode_t mode)
 {
-    RESET_FLAG(nes->cpu.p, D);
+    nes->cpu.D_FLAG = 0;
 }
 
 static void cli(struct nes *nes, addr_mode_t mode)
 {
-    RESET_FLAG(nes->cpu.p, I);
+    nes->cpu.I_FLAG = 0;
 }
 
 static void clv(struct nes *nes, addr_mode_t mode)
 {
-    RESET_FLAG(nes->cpu.p, V);
+    nes->cpu.V_FLAG = 0;
 }
 
 static void sec(struct nes *nes, addr_mode_t mode)
 {
-    SET_FLAG(nes->cpu.p, C);
+    nes->cpu.C_FLAG = 1;
 }
 
 static void sed(struct nes *nes, addr_mode_t mode)
 {
-    SET_FLAG(nes->cpu.p, D);
+    nes->cpu.D_FLAG = 1;
 }
 
 static void sei(struct nes *nes, addr_mode_t mode)
 {
-    SET_FLAG(nes->cpu.p, I);
+    nes->cpu.I_FLAG = 1;
 }
 
 /* System Functions */
@@ -898,8 +903,8 @@ static void brk(struct nes *nes, addr_mode_t mode)
 
     nes->cpu.pc++;
     stack_push_16(nes, nes->cpu.pc);
-    SET_FLAG(nes->cpu.p, B);
-    stack_push_8(nes, nes->cpu.p);
+    stack_push_8(nes, nes->cpu.p | 0x10);
+    nes->cpu.I_FLAG = 1;
     pcl = cpu_read(nes, 0xfffe);
     pch = cpu_read(nes, 0xffff);
     nes->cpu.pc = TO_U16(pcl, pch);
@@ -933,7 +938,8 @@ static void sax(struct nes *nes, addr_mode_t mode)
 
 static void jam(struct nes *nes, addr_mode_t mode)
 {
-    // free the CPU ???
+    // freeze the CPU ???
+    nes->cpu.pc--;
 }
 
 static void slo(struct nes *nes, addr_mode_t mode)
@@ -950,14 +956,14 @@ static void slo(struct nes *nes, addr_mode_t mode)
     case INDY:
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
-        new_c = nes->cpu.operation_value & 0x80;
+        new_c = BIT(nes->cpu.operation_value, 7);
         nes->cpu.operation_value <<= 1;
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         nes->cpu.a |= nes->cpu.operation_value;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     default:
         break;
@@ -966,18 +972,20 @@ static void slo(struct nes *nes, addr_mode_t mode)
 
 static void anc(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t tmp = nes->cpu.a & nes->cpu.operation_value;
+    nes->cpu.a = nes->cpu.a & nes->cpu.operation_value;
 
-    ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !tmp);
-    ASSIGN_FLAG(nes->cpu.p, C, tmp & 0x80);
+    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
+    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
+    ASSIGN_FLAG(nes->cpu.p, C, nes->cpu.a & 0x80);
+    nes->cpu.N_FLAG = nes->cpu.C_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void rla(struct nes *nes, addr_mode_t mode)
 {
     uint8_t new_c, old_c;
 
-    old_c = GET_FLAG(nes->cpu.p, C);
+    old_c = BIT(nes->cpu.p, C);
     switch (mode) {
     case ZP:
     case ZPX:
@@ -988,14 +996,14 @@ static void rla(struct nes *nes, addr_mode_t mode)
     case INDY:
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
-        new_c = nes->cpu.operation_value & 0x80;
+        new_c = BIT(nes->cpu.operation_value, 7);
         nes->cpu.operation_value = (nes->cpu.operation_value << 1) | old_c;
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         nes->cpu.a &= nes->cpu.operation_value;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     default:
         break;
@@ -1017,13 +1025,14 @@ static void sre(struct nes *nes, addr_mode_t mode)
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         new_c = nes->cpu.operation_value & 0x01;
+        new_c = BIT(nes->cpu.operation_value, 0);
         nes->cpu.operation_value >>= 1;
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         nes->cpu.a ^= nes->cpu.operation_value;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, new_c);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = new_c > 0;
         break;
     default:
         break;
@@ -1032,22 +1041,22 @@ static void sre(struct nes *nes, addr_mode_t mode)
 
 static void alr(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t tmp, new_c;
+    uint8_t new_c;
 
-    tmp = nes->cpu.a & nes->cpu.operation_value;
-    new_c = tmp & 0x01;
-    tmp >>= 1;
+    nes->cpu.a = nes->cpu.a & nes->cpu.operation_value;
+    new_c = BIT(nes->cpu.a, 0);
+    nes->cpu.a >>= 1;
 
-    ASSIGN_FLAG(nes->cpu.p, N, tmp & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !tmp);
-    ASSIGN_FLAG(nes->cpu.p, C, new_c);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.C_FLAG = new_c > 0;
 }
 
 static void rra(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t new_c, old_c, a;
+    uint8_t new_c, old_c, a, b;
 
-    old_c = GET_FLAG(nes->cpu.p, C);
+    old_c = BIT(nes->cpu.p, C);
     a = nes->cpu.a;
     switch (mode) {
     case ZP:
@@ -1059,18 +1068,16 @@ static void rra(struct nes *nes, addr_mode_t mode)
     case INDY:
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
-        new_c = nes->cpu.operation_value & 0x01;
-        nes->cpu.operation_value = (nes->cpu.operation_value >> 1) | (old_c << 7);
+        new_c = BIT(nes->cpu.operation_value, 0);
+        nes->cpu.operation_value = b = (nes->cpu.operation_value >> 1) | (old_c << 7);
         // ADC oper
-        nes->cpu.a += nes->cpu.operation_value + new_c;
-        cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
+        nes->cpu.a += b + new_c;
+        cpu_write(nes, nes->cpu.effective_addr, b);
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, 
-                    ((uint16_t)a + (uint16_t)(nes->cpu.operation_value + new_c)) & 0x100);
-        ASSIGN_FLAG(nes->cpu.p, V, 
-                    (a ^ nes->cpu.a) & ((nes->cpu.operation_value + new_c) ^ nes->cpu.a) & 0x80);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = ((a + b + new_c) & 0x100) > 0;
+        nes->cpu.V_FLAG = ((a ^ nes->cpu.a) & (b ^ nes->cpu.a) & 0x80) > 0;
         break;
     default:
         break;
@@ -1079,7 +1086,17 @@ static void rra(struct nes *nes, addr_mode_t mode)
 
 static void arr(struct nes *nes, addr_mode_t mode)
 {
-    // TODO: complete this instruction
+    uint8_t c;
+
+    c = BIT(nes->cpu.p, C);
+
+    nes->cpu.a &= nes->cpu.operation_value;
+    nes->cpu.a = (nes->cpu.a >> 1) | (c << 7);
+
+    nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.C_FLAG = BIT(nes->cpu.a, 6);
+    nes->cpu.V_FLAG = BIT(nes->cpu.a, 6) ^ BIT(nes->cpu.a, 5);
 }
 
 static void ane(struct nes *nes, addr_mode_t mode)
@@ -1129,8 +1146,8 @@ static void lax(struct nes *nes, addr_mode_t mode)
 
     nes->cpu.a = nes->cpu.x = nes->cpu.operation_value;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void lxa(struct nes *nes, addr_mode_t mode)
@@ -1151,10 +1168,10 @@ static void las(struct nes *nes, addr_mode_t mode)
         break;
     }
 
-    nes->cpu.a = nes->cpu.x = nes->cpu.p = nes->cpu.operation_value & nes->cpu.p;
+    nes->cpu.a = nes->cpu.x = nes->cpu.sp = nes->cpu.operation_value & nes->cpu.sp;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
+    nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.a;
 }
 
 static void dcp(struct nes *nes, addr_mode_t mode)
@@ -1170,9 +1187,9 @@ static void dcp(struct nes *nes, addr_mode_t mode)
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         nes->cpu.operation_value -= 1;
-        ASSIGN_FLAG(nes->cpu.p, N, (nes->cpu.a - nes->cpu.operation_value) & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !(nes->cpu.a - nes->cpu.operation_value));
-        ASSIGN_FLAG(nes->cpu.p, C, ((uint16_t)nes->cpu.a - (uint16_t)nes->cpu.operation_value) & 0x100);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a - nes->cpu.operation_value, 7);
+        nes->cpu.Z_FLAG = !(nes->cpu.a - nes->cpu.operation_value);
+        nes->cpu.C_FLAG = nes->cpu.a >= nes->cpu.operation_value;
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         break;
     default:
@@ -1182,18 +1199,18 @@ static void dcp(struct nes *nes, addr_mode_t mode)
 
 static void sbx(struct nes *nes, addr_mode_t mode)
 {
-    uint16_t tmp = (uint16_t)(nes->cpu.a & nes->cpu.x) - (uint16_t)nes->cpu.operation_value;
+    uint8_t a = nes->cpu.a & nes->cpu.x, b = nes->cpu.operation_value;
+
     nes->cpu.x = (nes->cpu.a & nes->cpu.x) - nes->cpu.operation_value;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.x & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.x);
-    ASSIGN_FLAG(nes->cpu.p, C, tmp & 0x100);
+    nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
+    nes->cpu.Z_FLAG = !nes->cpu.x;
+    nes->cpu.C_FLAG = a >= b;
 }
 
 static void isc(struct nes *nes, addr_mode_t mode)
 {
-    uint8_t a = nes->cpu.a, tmp;
-    uint8_t c = GET_FLAG(nes->cpu.p, C);
+    uint8_t a = nes->cpu.a, tmp, c = BIT(nes->cpu.p, C);
 
     switch (mode) {
     case ZP:
@@ -1210,10 +1227,10 @@ static void isc(struct nes *nes, addr_mode_t mode)
         tmp = nes->cpu.operation_value ^ 0xff;
         nes->cpu.a = a + tmp + c;
 
-        ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-        ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-        ASSIGN_FLAG(nes->cpu.p, C, ((uint16_t)a + (uint16_t)(tmp + c)) & 0x100);
-        ASSIGN_FLAG(nes->cpu.p, V, (a ^ nes->cpu.a) & ((tmp + c) ^ nes->cpu.a) & 0x80);
+        nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
+        nes->cpu.Z_FLAG = !nes->cpu.a;
+        nes->cpu.C_FLAG = ((a + tmp + c) & 0x100) > 0;
+        nes->cpu.V_FLAG = ((a ^ nes->cpu.a) & (tmp ^ nes->cpu.a) & 0x80) > 0;
 
         cpu_write(nes, nes->cpu.effective_addr, nes->cpu.operation_value);
         break;
@@ -1378,7 +1395,7 @@ static instruction_t opcode_table[] = {
     [0x93] = {"SHA ind,Y", INDY, sha},
     [0x94] = {"STY zpg,X", ZPX,  sty},
     [0x95] = {"STA zpg,X", ZPX,  sta},
-    [0x96] = {"STX zpg,X", ZPX,  stx},
+    [0x96] = {"STX zpg,Y", ZPY,  stx},
     [0x97] = {"SAX zpg,Y", ZPY,  sax},
     [0x98] = {"TYA impl",  IMPL, tya},
     [0x99] = {"STA abs,Y", ABSY, sta},
@@ -1486,10 +1503,16 @@ static instruction_t opcode_table[] = {
     [0xff] = {"ISC abs,X", ABSX,  isc},
 };
 
+/* other utils */
+void cpu_get_opcode_info(char *ret, uint8_t opcode)
+{
+    strcpy(ret, opcode_table[opcode].name);
+}
+
 static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
 {
-    uint8_t operand_8;
-    uint16_t operand_16, lb, hb;
+    uint8_t operand_8, lb, hb;
+    uint16_t operand_16;
 
     switch (addr_mode) {
     case IMPL:
@@ -1564,7 +1587,7 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
         lb = cpu_read(nes, (operand_8 + nes->cpu.x) & 0x00ff);
         // cycle #5
         hb = cpu_read(nes, (operand_8 + nes->cpu.x + 1) & 0x00ff);
-        nes->cpu.effective_addr = hb << 8 | lb;
+        nes->cpu.effective_addr = TO_U16(lb, hb);
         break;
     case INDY:
         // cycle #2
@@ -1573,8 +1596,8 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
         lb = cpu_read(nes, operand_8);
         // cycle #4
         hb = cpu_read(nes, (operand_8 + 1) & 0x00ff);
-        nes->cpu.effective_addr = (hb << 8 | lb) + nes->cpu.y;
-        if ((nes->cpu.effective_addr & 0xff00) != ((hb << 8 | lb) & 0xff00))
+        nes->cpu.effective_addr = TO_U16(lb, hb) + nes->cpu.y;
+        if ((nes->cpu.effective_addr & 0xff00) != (TO_U16(lb, hb) & 0xff00))
             nes->cpu.page_boundary_crossed = true;
         // cycle #5
         nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
@@ -1585,9 +1608,7 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
         // cycle #4
         lb = cpu_read(nes, operand_16);
         // cycle #5
-        // TODO: do we need to wrap around operand_16 + 1 to make sure
-        //       it stays in the same page as operand_16?
-        hb = cpu_read(nes, operand_16 + 1);
+        hb = cpu_read(nes, ((operand_16 + 1) & 0x00ff) | (operand_16 & 0xff00));
         nes->cpu.effective_addr = TO_U16(lb, hb);
         break;
     default:
