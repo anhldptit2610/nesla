@@ -11,12 +11,25 @@ void cpu_cycle(struct nes *nes)
 /* cpu read/write functions */
 static uint8_t cpu_read(struct nes *nes, uint16_t addr)
 {
+#ifdef CYCLE_DEBUG
+    nes->cpu.record[nes->cpu.record_index].action = READ;
+    nes->cpu.record[nes->cpu.record_index].addr = addr;
+    nes->cpu.record[nes->cpu.record_index].val = mmu_read(nes, addr);
+    nes->cpu.record_index++;
+#endif
+
     cpu_cycle(nes);
     return mmu_read(nes, addr);
 }
 
 static void cpu_write(struct nes *nes, uint16_t addr, uint8_t val)
 {
+#ifdef CYCLE_DEBUG
+    nes->cpu.record[nes->cpu.record_index].action = WRITE;
+    nes->cpu.record[nes->cpu.record_index].addr = addr;
+    nes->cpu.record[nes->cpu.record_index].val = val;
+    nes->cpu.record_index++;
+#endif
     cpu_cycle(nes);
     return mmu_write(nes, addr, val);
 }
@@ -117,7 +130,7 @@ static void lda(struct nes *nes, addr_mode_t mode)
     case INDY:
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_read(nes, nes->cpu.effective_addr);
+            nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
         nes->cpu.a = nes->cpu.operation_value;
         break;
@@ -133,23 +146,23 @@ static void ldx(struct nes *nes, addr_mode_t mode)
 {
     switch (mode) {
     case IMM:
-        nes->cpu.x = nes->cpu.operation_value;
         break;
     case ZP:
     case ZPY:
     case ABS:
-        nes->cpu.x = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         break;
     case ABSY:
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_read(nes, nes->cpu.effective_addr);
+            nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.x = nes->cpu.operation_value;
         break;
     default:
         break;
     }
+
+    nes->cpu.x = nes->cpu.operation_value;
 
     nes->cpu.Z_FLAG = !nes->cpu.x;
     nes->cpu.N_FLAG = BIT(nes->cpu.x, 7);
@@ -159,23 +172,23 @@ static void ldy(struct nes *nes, addr_mode_t mode)
 {
     switch (mode) {
     case IMM:
-        nes->cpu.y = nes->cpu.operation_value;
         break;
     case ZP:
     case ZPX:
     case ABS:
-        nes->cpu.y = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         break;
     case ABSX:
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_read(nes, nes->cpu.effective_addr);
+            nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.y = nes->cpu.operation_value;
         break;
     default:
         break;
     }
+
+    nes->cpu.y = nes->cpu.operation_value;
 
     nes->cpu.Z_FLAG = !nes->cpu.y;
     nes->cpu.N_FLAG = BIT(nes->cpu.y, 7);
@@ -285,7 +298,7 @@ static void php(struct nes *nes, addr_mode_t mode)
 
 static void pla(struct nes *nes, addr_mode_t mode)
 {
-    cpu_cycle(nes);
+    cpu_read(nes, STACK_BASE + nes->cpu.sp);
     nes->cpu.a = stack_pop_8(nes);
 
     nes->cpu.Z_FLAG = !nes->cpu.a;
@@ -294,7 +307,7 @@ static void pla(struct nes *nes, addr_mode_t mode)
 
 static void plp(struct nes *nes, addr_mode_t mode)
 {
-    cpu_cycle(nes);
+    cpu_read(nes, STACK_BASE + nes->cpu.sp);
     nes->cpu.p = (nes->cpu.p & 0x30) | (stack_pop_8(nes) & 0xcf);
 }
 
@@ -753,19 +766,16 @@ static void jmp(struct nes *nes, addr_mode_t mode)
 
 static void jsr(struct nes *nes, addr_mode_t mode)
 {
+    cpu_read(nes, STACK_BASE + nes->cpu.sp);
     stack_push_16(nes, nes->cpu.pc);
     nes->cpu.pc = TO_U16(nes->cpu.operand[0], cpu_read(nes, nes->cpu.pc));
 }
 
 static void rts(struct nes *nes, addr_mode_t mode)
 {
-    // TODO: all NES instruction cycles are either read or write 
-    //       to memory. Change all cpu_cycle() inside instructions
-    //       to corresponding read/write memory.
-    cpu_cycle(nes);
+    cpu_read(nes, STACK_BASE + nes->cpu.sp);
     nes->cpu.pc = stack_pop_16(nes);
-    cpu_cycle(nes);
-    nes->cpu.pc++;
+    cpu_read(nes, nes->cpu.pc++);
 }
 
 /* Branches */
@@ -773,10 +783,12 @@ static void rts(struct nes *nes, addr_mode_t mode)
 static void bcc(struct nes *nes, addr_mode_t mode)
 {
     if (!BIT(nes->cpu.p, C)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -784,10 +796,12 @@ static void bcc(struct nes *nes, addr_mode_t mode)
 static void bcs(struct nes *nes, addr_mode_t mode)
 {
     if (BIT(nes->cpu.p, C)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -795,10 +809,12 @@ static void bcs(struct nes *nes, addr_mode_t mode)
 static void beq(struct nes *nes, addr_mode_t mode)
 {
     if (BIT(nes->cpu.p, Z)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -806,10 +822,12 @@ static void beq(struct nes *nes, addr_mode_t mode)
 static void bmi(struct nes *nes, addr_mode_t mode)
 {
     if (BIT(nes->cpu.p, N)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -817,10 +835,12 @@ static void bmi(struct nes *nes, addr_mode_t mode)
 static void bne(struct nes *nes, addr_mode_t mode)
 {
     if (!BIT(nes->cpu.p, Z)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -828,10 +848,12 @@ static void bne(struct nes *nes, addr_mode_t mode)
 static void bpl(struct nes *nes, addr_mode_t mode)
 {
     if (!BIT(nes->cpu.p, N)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -839,10 +861,12 @@ static void bpl(struct nes *nes, addr_mode_t mode)
 static void bvc(struct nes *nes, addr_mode_t mode)
 {
     if (!BIT(nes->cpu.p, V)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -850,10 +874,12 @@ static void bvc(struct nes *nes, addr_mode_t mode)
 static void bvs(struct nes *nes, addr_mode_t mode)
 {
     if (BIT(nes->cpu.p, V)) {
-        nes->cpu.pc = nes->cpu.effective_addr;
+        cpu_read(nes, nes->cpu.pc);
+        nes->cpu.pc = nes->cpu.non_effective_addr;
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_cycle(nes);
+            cpu_read(nes, nes->cpu.pc);
+            nes->cpu.pc = nes->cpu.effective_addr;
         }
     }
 }
@@ -912,10 +938,21 @@ static void brk(struct nes *nes, addr_mode_t mode)
 
 static void nop(struct nes *nes, addr_mode_t mode)
 {
+    switch (mode) {
+    case ZP:
+    case ABS:
+    case ZPX:
+    case ABSX:
+        cpu_read(nes, nes->cpu.effective_addr);
+        break;
+    default:
+        break;
+    }
 }
 
 static void rti(struct nes *nes, addr_mode_t mode)
 {
+    cpu_read(nes, STACK_BASE + nes->cpu.sp);
     nes->cpu.p = (nes->cpu.p & 0x30) | (stack_pop_8(nes) & 0xcf);
     nes->cpu.pc = stack_pop_16(nes);
 }
@@ -1137,7 +1174,7 @@ static void lax(struct nes *nes, addr_mode_t mode)
     case INDY:
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_read(nes, nes->cpu.effective_addr);
+            nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         } 
         break;
     default:
@@ -1161,7 +1198,7 @@ static void las(struct nes *nes, addr_mode_t mode)
     case ABSY:
         if (nes->cpu.page_boundary_crossed) {
             nes->cpu.page_boundary_crossed = false;
-            cpu_read(nes, nes->cpu.effective_addr);
+            nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
         break;
     default:
@@ -1557,24 +1594,27 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
         // cycle #2 & #3
         operand_16 = fetch_16(nes);
         nes->cpu.effective_addr = operand_16 + nes->cpu.x;
+        nes->cpu.non_effective_addr = (nes->cpu.effective_addr & 0x00ff) | (operand_16 & 0xff00);
         if ((nes->cpu.effective_addr & 0xff00) != (operand_16 & 0xff00))
             nes->cpu.page_boundary_crossed = true;
         // cycle #4
-        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.non_effective_addr);
         break;
     case ABSY:
         // cycle #2 & #3
         operand_16 = fetch_16(nes);
         nes->cpu.effective_addr = operand_16 + nes->cpu.y;
+        nes->cpu.non_effective_addr = (nes->cpu.effective_addr & 0x00ff) | (operand_16 & 0xff00);
         if ((nes->cpu.effective_addr & 0xff00) != (operand_16 & 0xff00))
             nes->cpu.page_boundary_crossed = true;
         // cycle #4
-        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.non_effective_addr);
         break;
     case REL:
         // cycle #2
         operand_8 = fetch_8(nes);
         nes->cpu.effective_addr = nes->cpu.pc + (int8_t)operand_8; 
+        nes->cpu.non_effective_addr = (nes->cpu.effective_addr & 0x00ff) | (nes->cpu.pc & 0xff00);
         if ((nes->cpu.pc & 0xff00) != (nes->cpu.effective_addr & 0xff00))
             nes->cpu.page_boundary_crossed = true;
         break;
@@ -1597,10 +1637,11 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
         // cycle #4
         hb = cpu_read(nes, (operand_8 + 1) & 0x00ff);
         nes->cpu.effective_addr = TO_U16(lb, hb) + nes->cpu.y;
+        nes->cpu.non_effective_addr = (nes->cpu.effective_addr & 0x00ff) | (TO_U16(lb, hb) & 0xff00);
         if ((nes->cpu.effective_addr & 0xff00) != (TO_U16(lb, hb) & 0xff00))
             nes->cpu.page_boundary_crossed = true;
         // cycle #5
-        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.non_effective_addr);
         break;
     case IND:
         // cycle #2 & #3
@@ -1618,6 +1659,10 @@ static void handle_addressing_mode(struct nes *nes, addr_mode_t addr_mode)
 
 void cpu_step(struct nes *nes)
 {
+#ifdef CYCLE_DEBUG
+    nes->cpu.record_index = 0;
+#endif
+
     nes->cpu.opcode = fetch_8(nes);
     handle_addressing_mode(nes, opcode_table[nes->cpu.opcode].addr_mode);
     // run the opcode execution
