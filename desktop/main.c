@@ -7,6 +7,5 @@ int main(int argc, char *argv[])
     struct nes nes;
 
     cpu_at_power_up(&nes);
-    printf("Hello\n");
     return 0;
 }

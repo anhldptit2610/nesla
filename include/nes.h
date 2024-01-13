@@ -8,6 +8,15 @@
 
 #include "common.h"
 
+struct memory_access_record {
+    uint16_t addr;
+    uint8_t val;
+    enum r_w {
+        READ,
+        WRITE,
+    } action;
+};
+
 struct cpu {
     /* registers */
     uint8_t a;
@@ -34,7 +43,13 @@ struct cpu {
     uint8_t operand[2];
     uint8_t operation_value;
     uint16_t effective_addr;
+    uint16_t non_effective_addr;
     bool page_boundary_crossed;
+
+#ifdef CYCLE_DEBUG
+    struct memory_access_record record[10];
+    int record_index;
+#endif
 };
 
 struct nes {

@@ -10,12 +10,40 @@ struct cpu_state {
     uint8_t x;
     uint8_t y;
     uint8_t p;
+
     struct memory {
         uint16_t addr;
         uint8_t val;
     } mem[100];
     int mem_index;
+
+#ifdef CYCLE_DEBUG
+    struct memory_access_record record[10];
+    int record_index;
+#endif
 };
+
+void print_test_info(struct cpu_state initial, struct cpu_state final)
+{
+    printf("Initial:\n");
+    printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
+                initial.pc, initial.sp, initial.a, initial.x, initial.y, initial.p);
+    printf("mem: ");
+    for (int i = 0; i < initial.mem_index; i++)
+        printf("%04x - %02x ", initial.mem[i].addr, initial.mem[i].val);
+    printf("\nFinal:\n");
+    printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
+                final.pc, final.sp, final.a, final.x, final.y, final.p);
+    printf("mem: ");
+    for (int i = 0; i < final.mem_index; i++)
+        printf("%04x - %02x ", final.mem[i].addr, final.mem[i].val);
+#ifdef CYCLE_DEBUG
+    printf("\n\nCycles:\n");
+    for (int i = 0; i < final.record_index; i++)
+        printf("%04x - %02x - %s\n", final.record[i].addr, final.record[i].val,
+                (final.record[i].action == READ) ? "READ" : "WRITE");
+#endif
+}
 
 void read_json(char buffer[1024], FILE *fp)
 {
@@ -34,7 +62,7 @@ void read_json(char buffer[1024], FILE *fp)
 void setup_test(char *test, struct nes *nes, char *test_name, 
                 struct cpu_state *initial_state, struct cpu_state *final_state)
 {
-    cJSON *name = NULL, *initial = NULL, *final = NULL;
+    cJSON *name = NULL, *initial = NULL, *final = NULL, *cycles = NULL;
     cJSON *json_test = cJSON_Parse(test);
     cJSON *node = NULL, *element = NULL, *j = NULL;
     uint16_t state_buffer[6], mem_buffer[2], i, k;
@@ -84,6 +112,7 @@ void setup_test(char *test, struct nes *nes, char *test_name,
     initial_state->y = nes->cpu.y = state_buffer[4];
     initial_state->p = nes->cpu.p = state_buffer[5];
     initial_state->opcode = nes->mem[initial_state->pc];
+
     // parse final state
     final = cJSON_GetObjectItemCaseSensitive(json_test, "final");
     if (!final) {
@@ -117,11 +146,34 @@ void setup_test(char *test, struct nes *nes, char *test_name,
     final_state->y = state_buffer[4];
     final_state->p = state_buffer[5];
 
+#ifdef CYCLE_DEBUG
+    // parse cycles
+    cycles = cJSON_GetObjectItemCaseSensitive(json_test, "cycles");
+    cJSON_ArrayForEach(element, cycles)
+    {
+        k = 0;
+        cJSON_ArrayForEach(j, element)
+        {
+            if (cJSON_IsString(j)) {
+                if (!strcmp(j->valuestring, "read")) 
+                    final_state->record[final_state->record_index].action = READ;
+                else if (!strcmp(j->valuestring, "write"))
+                    final_state->record[final_state->record_index].action = WRITE;
+            } else {
+                mem_buffer[k++] = j->valueint;
+            }
+        }
+        final_state->record[final_state->record_index].addr = mem_buffer[0];
+        final_state->record[final_state->record_index].val = mem_buffer[1];
+        final_state->record_index++;
+    }
+#endif
+
 parse_failed:
     cJSON_Delete(json_test);
 }
 
-int check_test(struct nes *nes, struct cpu_state *final)
+int check_reg_and_mem(struct nes *nes, struct cpu_state *final)
 {
     int ret = 0;
     bool register_failed = false, memory_failed = false;
@@ -148,6 +200,74 @@ int check_test(struct nes *nes, struct cpu_state *final)
     return ret;
 }
 
+#ifdef CYCLE_DEBUG
+int check_cycles(struct nes *nes, struct cpu_state *final)
+{
+    int ret = 0;
+
+    for (int i = 0; i < final->record_index; i++) {
+        if (nes->cpu.record[i].addr != final->record[i].addr ||
+            nes->cpu.record[i].val != final->record[i].val ||
+            nes->cpu.record[i].action != final->record[i].action) {
+            ret = 1;
+            break;
+        }
+    }
+    return ret;
+}
+#endif
+
+void print_reg_and_mem_error(char *test_name, char *opcode_info, struct nes *nes,
+                            struct cpu_state *initial, struct cpu_state *final, int ret)
+{
+    printf("Register and mem test failed.\n Case: %s. Opcode name & mode: %s\n", test_name, opcode_info);
+    if (ret == 1)
+        printf("Reason: register state not matched\n");
+    else if (ret == 2)
+        printf("Reason: memory not matched\n");
+    else if (ret == 3)
+        printf("Reason: register state and memory not matched\n");
+    printf("--------------------------------------------\n");
+    printf("Initial state:\n");
+    printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
+            initial->pc, initial->sp, initial->a, initial->x, initial->y, initial->p);
+    printf("mem: ");
+    for (int i = 0; i < initial->mem_index; i++)
+        printf("%04x - %02x ", initial->mem[i].addr, initial->mem[i].val);
+    printf("\n--------------------------------------------\n");
+    printf("CPU state:\n");
+    printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
+            nes->cpu.pc, nes->cpu.sp, nes->cpu.a, nes->cpu.x, nes->cpu.y, nes->cpu.p);
+    printf("mem: ");
+    for (int i = 0; i < final->mem_index; i++)
+        printf("%04x - %02x ", final->mem[i].addr, nes->mem[final->mem[i].addr]);
+    printf("\n--------------------------------------------\n");
+    printf("final state:\n");
+    printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
+            final->pc, final->sp, final->a, final->x, final->y, final->p);
+    printf("mem: ");
+    for (int i = 0; i < final->mem_index; i++)
+        printf("%04x - %02x ", final->mem[i].addr, final->mem[i].val);
+    printf("\n");
+}
+
+#ifdef CYCLE_DEBUG
+void print_cycle_error(struct nes *nes, struct cpu_state *final,
+                        char *test_name, char *opcode_info)
+{
+    printf("Cycle check failed.\nCase: %s Opcode_info: %s\nComparision:\n",
+            test_name, opcode_info);
+    printf("NES----------------------test\n");
+    for (int i = 0; i < final->record_index; i++) {
+        printf("%04x - %02x - %s | %04x - %02x - %s\n",
+                nes->cpu.record[i].addr, nes->cpu.record[i].val,
+                (nes->cpu.record[i].action == READ) ? "READ " : "WRITE",
+                final->record[i].addr, final->record[i].val,
+                (final->record[i].action == READ) ? "READ " : "WRITE");
+    }
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     struct cpu_state initial, final;
@@ -164,47 +284,33 @@ int main(int argc, char *argv[])
 
 
     for (int m = 0; m < 10000; m++) {
-        initial.mem_index = final.mem_index = 0;
         char json_test[2048], test_name[50], opcode_name[20];
-        read_json(json_test, fp);
         struct nes nes;
+
+        initial.mem_index = final.mem_index = 0;
+#ifdef CYCLE_DEBUG
+        final.record_index = 0;
+#endif
+        read_json(json_test, fp);
         setup_test(json_test, &nes, test_name, &initial, &final);
         cpu_get_opcode_info(opcode_name, initial.opcode);
         cpu_step(&nes);
-        if ((ret = check_test(&nes, &final)) > 0) {
-            printf("Test failed at case %s. Opcode name & mode: %s\n", test_name, opcode_name);
-            if (ret == 1)
-                printf("Reason: register state not matched\n");
-            else if (ret == 2)
-                printf("Reason: memory not matched\n");
-            else if (ret == 3)
-                printf("Reason: register state and memory not matched\n");
-            printf("--------------------------------------------\n");
-            printf("Initial state:\n");
-            printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
-                    initial.pc, initial.sp, initial.a, initial.x, initial.y, initial.p);
-            printf("mem: ");
-            for (int i = 0; i < initial.mem_index; i++)
-                printf("%04x - %02x ", initial.mem[i].addr, initial.mem[i].val);
-            printf("\n--------------------------------------------\n");
-            printf("CPU state:\n");
-            printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
-                    nes.cpu.pc, nes.cpu.sp, nes.cpu.a, nes.cpu.x, nes.cpu.y, nes.cpu.p);
-            printf("mem: ");
-            for (int i = 0; i < final.mem_index; i++)
-                printf("%04x - %02x ", final.mem[i].addr, nes.mem[final.mem[i].addr]);
-            printf("\n--------------------------------------------\n");
-            printf("final state:\n");
-            printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",
-                    final.pc, final.sp, final.a, final.x, final.y, final.p);
-            printf("mem: ");
-            for (int i = 0; i < final.mem_index; i++)
-                printf("%04x - %02x ", final.mem[i].addr, final.mem[i].val);
-            printf("\n");
-            exit(EXIT_FAILURE);
+
+        if ((ret = check_reg_and_mem(&nes, &final)) > 0) {
+            print_reg_and_mem_error(test_name, opcode_name, &nes, &initial, &final, ret);
+            goto error;
         } 
+#ifdef CYCLE_DEBUG
+        if ((ret = check_cycles(&nes, &final)) > 0) {
+            print_cycle_error(&nes, &final, test_name, opcode_name);
+            goto error;
+        }
+#endif
     }
     printf("Test %s ok\n", argv[1]);
     printf("*******************************************************************\n");
     return 0;
+
+error:
+    exit(EXIT_FAILURE);
 }
