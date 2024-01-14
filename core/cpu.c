@@ -17,7 +17,6 @@ static uint8_t cpu_read(struct nes *nes, uint16_t addr)
     nes->cpu.record[nes->cpu.record_index].val = mmu_read(nes, addr);
     nes->cpu.record_index++;
 #endif
-
     cpu_cycle(nes);
     return mmu_read(nes, addr);
 }
@@ -123,7 +122,7 @@ static void lda(struct nes *nes, addr_mode_t mode)
     case ZPY:
     case ABS:
     case XIND:
-        nes->cpu.a = cpu_read(nes, nes->cpu.effective_addr);
+        nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         break;
     case ABSX:
     case ABSY:
@@ -132,11 +131,12 @@ static void lda(struct nes *nes, addr_mode_t mode)
             nes->cpu.page_boundary_crossed = false;
             nes->cpu.operation_value = cpu_read(nes, nes->cpu.effective_addr);
         }
-        nes->cpu.a = nes->cpu.operation_value;
         break;
     default:
         break;
     }
+
+    nes->cpu.a = nes->cpu.operation_value;
 
     nes->cpu.Z_FLAG = !nes->cpu.a;
     nes->cpu.N_FLAG = BIT(nes->cpu.a, 7);
@@ -1011,11 +1011,9 @@ static void anc(struct nes *nes, addr_mode_t mode)
 {
     nes->cpu.a = nes->cpu.a & nes->cpu.operation_value;
 
-    ASSIGN_FLAG(nes->cpu.p, N, nes->cpu.a & 0x80);
-    ASSIGN_FLAG(nes->cpu.p, Z, !nes->cpu.a);
-    ASSIGN_FLAG(nes->cpu.p, C, nes->cpu.a & 0x80);
     nes->cpu.N_FLAG = nes->cpu.C_FLAG = BIT(nes->cpu.a, 7);
     nes->cpu.Z_FLAG = !nes->cpu.a;
+    nes->cpu.C_FLAG = BIT(nes->cpu.a, 7);
 }
 
 static void rla(struct nes *nes, addr_mode_t mode)

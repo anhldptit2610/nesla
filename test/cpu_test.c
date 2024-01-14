@@ -41,7 +41,7 @@ void print_test_info(struct cpu_state initial, struct cpu_state final)
     printf("\n\nCycles:\n");
     for (int i = 0; i < final.record_index; i++)
         printf("%04x - %02x - %s\n", final.record[i].addr, final.record[i].val,
-                (final.record[i].action == READ) ? "READ" : "WRITE");
+                (final.record[i].action == R) ? "READ" : "W");
 #endif
 }
 
@@ -156,9 +156,9 @@ void setup_test(char *test, struct nes *nes, char *test_name,
         {
             if (cJSON_IsString(j)) {
                 if (!strcmp(j->valuestring, "read")) 
-                    final_state->record[final_state->record_index].action = READ;
+                    final_state->record[final_state->record_index].action = R;
                 else if (!strcmp(j->valuestring, "write"))
-                    final_state->record[final_state->record_index].action = WRITE;
+                    final_state->record[final_state->record_index].action = W;
             } else {
                 mem_buffer[k++] = j->valueint;
             }
@@ -261,9 +261,9 @@ void print_cycle_error(struct nes *nes, struct cpu_state *final,
     for (int i = 0; i < final->record_index; i++) {
         printf("%04x - %02x - %s | %04x - %02x - %s\n",
                 nes->cpu.record[i].addr, nes->cpu.record[i].val,
-                (nes->cpu.record[i].action == READ) ? "READ " : "WRITE",
+                (nes->cpu.record[i].action == R) ? "READ " : "WRITE",
                 final->record[i].addr, final->record[i].val,
-                (final->record[i].action == READ) ? "READ " : "WRITE");
+                (final->record[i].action == R) ? "READ " : "WRITE");
     }
 }
 #endif

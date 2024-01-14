@@ -2,6 +2,11 @@
     "files.associations": {
         "cpu.h": "c",
         "nes.h": "c",
-        "common.h": "c"
+        "common.h": "c",
+        "rom.h": "c",
+        "mmu.h": "c",
+        "apu.h": "c",
+        "ppu.h": "c",
+        "cart.h": "c"
     }
 }

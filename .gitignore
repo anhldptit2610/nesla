@@ -1,3 +1,4 @@
 /build
 /test/ProcessorTests
 /test/ProcessorTests/nestest.log
+/roms

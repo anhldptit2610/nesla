@@ -6,14 +6,18 @@
 
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "common.h"
 
 struct memory_access_record {
     uint16_t addr;
     uint8_t val;
     enum r_w {
-        READ,
-        WRITE,
+        R,
+        W,
     } action;
 };
 
@@ -52,7 +56,30 @@ struct cpu {
 #endif
 };
 
+struct rom_info {
+    uint32_t prg_size;
+    uint32_t chr_size;
+    uint32_t prg_ram_size;
+    uint8_t mapper;
+    enum MIRRORING {
+        HORIZONTAL,
+        VERTICAL
+    } mirroring;
+    uint8_t type : 2;
+};
+
+struct cart {
+    uint8_t *prg_rom;
+    uint8_t *chr_rom;
+    struct rom_info info;
+};
+
 struct nes {
     uint8_t mem[MEM_SIZE];
     struct cpu cpu;
+    struct cart cart;
 };
+
+#ifdef __cplusplus
+}
+#endif
