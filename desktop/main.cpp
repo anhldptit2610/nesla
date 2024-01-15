@@ -6,6 +6,15 @@
 #include "cart.h"
 #include <SDL2/SDL.h>
 
+void print(struct nes *nes)
+{
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 16; j++)
+            printf("%02x ", nes->cart.prg_rom[j + i * 16]);
+        printf("\n");
+    }
+}
+
 int main(int argc, char*argv[])
 {
     struct nes nes;
@@ -18,8 +27,7 @@ int main(int argc, char*argv[])
     cart_load(&nes, argv[1]);
     cart_print_info(&nes.cart.info);
     nes.cpu.pc = 0xc000;
-    while (1) {
+    for (int i = 0; i < 8991; i++)
         cpu_step(&nes);
-    }
     return 0;
 }

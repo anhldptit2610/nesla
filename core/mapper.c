@@ -6,8 +6,9 @@ enum SUPPORTED_MAPPER {
 
 static void m000_rw(struct nes *nes, uint16_t addr, uint8_t *val, mem_mode_t mode)
 {
+    addr &= 0xbfff;
     if (mode == READ)
-        *val = nes->cart.chr_rom[addr - 0x8000];
+        *val = nes->cart.prg_rom[addr - 0x8000];
 }
 
 void (*mapper_handler[])(struct nes *nes, uint16_t addr, uint8_t *val, mem_mode_t mode) = {

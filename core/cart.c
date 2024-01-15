@@ -1,6 +1,6 @@
 #include "cart.h"
 
-static enum CART_REGION {
+enum CART_REGION {
     ROM = 1,
     UNMAP = 2,
 };

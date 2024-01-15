@@ -3,7 +3,8 @@ add_library(neslacore cpu.c
                       cart.c
                       ppu.c
                       apu.c
-                      mapper.c)
+                      mapper.c
+                      interrupt.c)
 
 target_include_directories(neslacore PUBLIC ${PROJECT_SOURCE_DIR}/core/)
 

@@ -15,11 +15,6 @@ extern "C" {
 
 #define KB          1024
 
-typedef enum MEM_MODE {
-    READ,
-    WRITE
-} mem_mode_t;
-
 /* macros */
 #define LSB(n)                  (((uint16_t)n >> 0) & 0x00ff)
 #define MSB(n)                  (((uint16_t)n >> 8) & 0x00ff)

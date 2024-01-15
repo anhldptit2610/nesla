@@ -12,6 +12,18 @@ extern "C" {
 
 #include "common.h"
 
+typedef enum MEM_MODE {
+    READ,
+    WRITE
+} mem_mode_t;
+
+typedef enum INTERRUPT {
+    NMI = (1U << 0),
+    IRQ = (1U << 1),
+    RESET = (1U << 2),
+    BRK = (1U << 3)
+} interrupt_t;
+
 struct memory_access_record {
     uint16_t addr;
     uint8_t val;
@@ -31,14 +43,14 @@ struct cpu {
     union {
         uint8_t p;
         struct {
-            uint8_t C_FLAG : 1;
-            uint8_t Z_FLAG : 1;
-            uint8_t I_FLAG : 1;
-            uint8_t D_FLAG : 1;
-            uint8_t B_FLAG : 1;
+            uint8_t C : 1;
+            uint8_t Z : 1;
+            uint8_t I : 1;
+            uint8_t D : 1;
+            uint8_t B : 1;
             uint8_t UNUSED : 1;
-            uint8_t V_FLAG : 1;
-            uint8_t N_FLAG : 1;
+            uint8_t V : 1;
+            uint8_t N : 1;
         };
     };
 
@@ -50,10 +62,13 @@ struct cpu {
     uint16_t non_effective_addr;
     bool page_boundary_crossed;
 
-#ifdef CYCLE_DEBUG
+    /* interrupt */
+    bool nmi;
+    bool irq;
+    uint8_t interrupt_pending;
+
     struct memory_access_record record[10];
     int record_index;
-#endif
 };
 
 struct rom_info {
