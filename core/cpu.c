@@ -6,17 +6,53 @@ void cpu_cycle(struct nes *nes)
     // TODO: complete this function
 }
 
+/* The NMI input is connected to an edge detector, the IRQ input is connected
+   to the level detector. Edge detector polls the status of NMI line during 
+   bottom half of each CPU cycle, raises an internal signal if the input goes
+   from high during one cycle to low during next. Level detector poll the status
+   of IRQ line during bottom half. They both raise the internal signal high during
+   the next top half the the following cycle, but IRQ only high for that cycle only.
+*/
+
+void cycle_top_half(struct nes *nes)
+{
+    nes->cpu.prev_nmi = nes->cpu.nmi;
+    nes->cpu.prev_irq = nes->cpu.irq;
+
+
+    if (nes->cpu.raise_nmi && !nes->cpu.nmi_pending)
+        nes->cpu.nmi_pending = 1;
+    nes->cpu.raise_nmi = 0;
+
+    // IRQ internal signal goes high for 1 cycle only
+    nes->cpu.irq_pending = (nes->cpu.raise_irq) ? 1 : 0;
+    nes->cpu.raise_irq = 0;
+}
+
+void cycle_bottom_half(struct nes *nes)
+{
+    nes->cpu.raise_nmi = (nes->cpu.prev_nmi && !nes->cpu.nmi) ? 1 : 0;
+    nes->cpu.raise_irq = (!nes->cpu.irq) ? 1 : 0;
+}
+
 /* cpu read/write functions */
 uint8_t cpu_read(struct nes *nes, uint16_t addr)
 {
+    uint8_t ret;
+
+    cycle_top_half(nes);
     cpu_cycle(nes);
-    return mmu_read(nes, addr);
+    ret =  mmu_read(nes, addr);
+    cycle_bottom_half(nes);
+    return ret;
 }
 
 void cpu_write(struct nes *nes, uint16_t addr, uint8_t val)
 {
+    cycle_top_half(nes);
     cpu_cycle(nes);
-    return mmu_write(nes, addr, val);
+    mmu_write(nes, addr, val);
+    cycle_bottom_half(nes);
 }
 
 static uint8_t fetch_8(struct nes *nes)
@@ -747,7 +783,6 @@ static void ror(struct nes *nes, addr_mode_t mode)
 /* Jumps & Calls */
 static void jmp(struct nes *nes, addr_mode_t mode)
 {
-    printf("%04x\n", nes->cpu.effective_addr);
     nes->cpu.pc = nes->cpu.effective_addr;
 }
 
@@ -913,13 +948,15 @@ static void sei(struct nes *nes, addr_mode_t mode)
 static void brk(struct nes *nes, addr_mode_t mode)
 {
     uint8_t pcl, pch;
+    uint16_t base_addr;
 
     nes->cpu.pc++;
     stack_push_16(nes, nes->cpu.pc);
+    base_addr = (nes->cpu.nmi_pending) ? NMI_VECTOR_BASE : IRQ_BRK_VECTOR_BASE;
     stack_push_8(nes, nes->cpu.p | 0x10);
     nes->cpu.I = 1;
-    pcl = cpu_read(nes, 0xfffe);
-    pch = cpu_read(nes, 0xffff);
+    pcl = cpu_read(nes, base_addr);
+    pch = cpu_read(nes, base_addr + 1);
     nes->cpu.pc = TO_U16(pcl, pch);
 }
 
@@ -1657,13 +1694,16 @@ void write_log(struct nes *nes)
 
 void cpu_step(struct nes *nes)
 {
+#ifdef CYCLE_DEBUG
     write_log(nes);
+#endif
     nes->cpu.opcode = fetch_8(nes);
     handle_addressing_mode(nes, opcode_table[nes->cpu.opcode].addr_mode);
     // run the opcode execution
     opcode_table[nes->cpu.opcode].handler(nes, opcode_table[nes->cpu.opcode].addr_mode);
 
     // interrupt polling 
+    // TODO: branch instructions and interrupts
     interrupt_process(nes);
 }
 
@@ -1680,5 +1720,12 @@ void cpu_at_power_up(struct nes *nes)
     memset(&nes->mem[0x4000], 0, 0x10);
     memset(&nes->mem[0x4010], 0, 0x04);
     // TODO: APU registers state
-    nes->cpu.interrupt_pending = 0;
+
+    // interrupt internal parts
+    nes->cpu.irq_pending = 0;
+    nes->cpu.nmi_pending = 0;
+    nes->cpu.nmi = 1;
+    nes->cpu.prev_nmi = 1;
+    nes->cpu.irq = 1;
+    nes->cpu.prev_irq = 1;
 }

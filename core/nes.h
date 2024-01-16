@@ -65,7 +65,14 @@ struct cpu {
     /* interrupt */
     bool nmi;
     bool irq;
-    uint8_t interrupt_pending;
+    bool prev_nmi;
+    bool prev_irq;
+    bool nmi_pending;
+    bool irq_pending;
+    bool prev_nmi_pending;
+    bool prev_irq_pending;
+    bool raise_nmi;
+    bool raise_irq;
 
     struct memory_access_record record[10];
     int record_index;
