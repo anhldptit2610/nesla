@@ -10,10 +10,14 @@ extern "C" {
 #include <stdbool.h>
 #include <string.h>
 
-#define MEM_SIZE    0x10000
-#define STACK_BASE  0x0100
-
 #define KB          1024
+
+#define CPU_MEM_SIZE            0x10000
+#define PPU_MEM_SIZE            0x4000
+#define STACK_BASE          0x0100
+#define SCREEN_HEIGHT       240
+#define SCREEN_WIDTH        256
+
 
 /* macros */
 #define LSB(n)                  (((uint16_t)n >> 0) & 0x00ff)

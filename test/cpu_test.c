@@ -103,7 +103,7 @@ void setup_test(char *test, struct nes *nes, char *test_name,
         initial_state->mem[initial_state->mem_index].addr = mem_buffer[0];
         initial_state->mem[initial_state->mem_index].val = mem_buffer[1];
         initial_state->mem_index++;
-        nes->mem[mem_buffer[0]] = mem_buffer[1];
+        nes->cpu.mem[mem_buffer[0]] = mem_buffer[1];
     }
     initial_state->pc = nes->cpu.pc = state_buffer[0];
     initial_state->sp = nes->cpu.sp = state_buffer[1];
@@ -111,7 +111,7 @@ void setup_test(char *test, struct nes *nes, char *test_name,
     initial_state->x = nes->cpu.x = state_buffer[3];
     initial_state->y = nes->cpu.y = state_buffer[4];
     initial_state->p = nes->cpu.p = state_buffer[5];
-    initial_state->opcode = nes->mem[initial_state->pc];
+    initial_state->opcode = nes->cpu.mem[initial_state->pc];
 
     // parse final state
     final = cJSON_GetObjectItemCaseSensitive(json_test, "final");
@@ -186,7 +186,7 @@ int check_reg_and_mem(struct nes *nes, struct cpu_state *final)
     // check memory state
     for (int i = 0; i < final->mem_index; i++) {
         uint16_t addr = final->mem[i].addr;
-        if (nes->mem[addr] != final->mem[i].val) {
+        if (nes->cpu.mem[addr] != final->mem[i].val) {
             memory_failed = true;
             break;
         }
@@ -240,7 +240,7 @@ void print_reg_and_mem_error(char *test_name, char *opcode_info, struct nes *nes
             nes->cpu.pc, nes->cpu.sp, nes->cpu.a, nes->cpu.x, nes->cpu.y, nes->cpu.p);
     printf("mem: ");
     for (int i = 0; i < final->mem_index; i++)
-        printf("%04x - %02x ", final->mem[i].addr, nes->mem[final->mem[i].addr]);
+        printf("%04x - %02x ", final->mem[i].addr, nes->cpu.mem[final->mem[i].addr]);
     printf("\n--------------------------------------------\n");
     printf("final state:\n");
     printf("pc - %04x sp - %02x a - %02x x - %02x y - %02x p - %02x\n",

@@ -12,6 +12,14 @@ extern "C" {
 
 #include "common.h"
 
+#define CACHE_SIZE      6
+
+typedef enum RUN_MODE {
+    NORMAL,
+    STEP,
+    PAUSE,
+} run_mode_t;
+
 typedef enum MEM_MODE {
     READ,
     WRITE
@@ -34,6 +42,8 @@ struct memory_access_record {
 };
 
 struct cpu {
+    uint8_t mem[CPU_MEM_SIZE];
+
     /* registers */
     uint8_t a;
     uint8_t x;
@@ -76,6 +86,9 @@ struct cpu {
 
     struct memory_access_record record[10];
     int record_index;
+
+    // debugging purpose
+    uint16_t current_pc;
 };
 
 struct rom_info {
@@ -96,10 +109,86 @@ struct cart {
     struct rom_info info;
 };
 
+struct ppu {
+    /* registers */
+    union {
+        uint8_t ppuctrl;
+        struct {
+            uint8_t NN : 2;     /* name table select */
+            uint8_t I : 1;      /* increment mode */
+            uint8_t S : 1;      /* sprite tile select */
+            uint8_t BG : 1;      /* background tile select */
+            uint8_t H : 1;      /* sprite height */
+            uint8_t P : 1;      /* PPU master/slave */
+            uint8_t NE : 1;      /* NMI enable */
+        };
+    };
+
+    union {
+        uint8_t ppumask;
+        struct {
+            uint8_t GR : 1;     /* grey scale */
+            uint8_t m : 1;      /* background left column enable */
+            uint8_t M : 1;      /* sprite left column enable */
+            uint8_t b : 1;      /* background enable */
+            uint8_t s : 1;      /* sprite enable */
+            uint8_t R : 1;      /* red */
+            uint8_t G : 1;      /* green */
+            uint8_t B : 1;      /* blue */
+        };
+    };
+
+    union {
+        uint8_t ppustatus;
+        struct {
+            uint8_t UNUSED : 5;
+            uint8_t O : 1;      /* sprite overflow */
+            uint8_t SPR : 1;      /* sprite 0 hit */
+            uint8_t VBL : 1;      /* vblank */
+        };
+    };
+
+    uint8_t oamaddr;
+    uint8_t ppuaddr;
+
+    /* internal registers */
+    uint16_t v : 15;    /* current VRAM address */
+    uint16_t t : 15;    /* temporary VRAM address */
+    uint16_t x : 3;     /* fine X scroll */
+    uint16_t w : 1;     /* first or second write toggle */
+
+    /* internal data bus */
+    uint8_t io_db;
+
+    /* internal memories(including OAM), not exposed with CPU */
+    uint8_t mem[0x4000];
+    uint8_t oam[256];
+    uint8_t vram[2 * KB];
+
+    /* NMI registers */
+    bool nmi_occured;
+    bool nmi_output;
+
+    /* timing - related */
+    int cycles;
+    int scanlines;
+
+    /* others */
+    uint8_t scroll_offset[2];
+    uint8_t read_buffer;
+};
+
 struct nes {
-    uint8_t mem[MEM_SIZE];
+    run_mode_t run_mode;
+    bool step;
     struct cpu cpu;
     struct cart cart;
+    struct ppu ppu;
+
+    /* for disassembler */
+    uint16_t instr_addr_cache[CACHE_SIZE];
+    int cache_index;
+    int cache_size;
 };
 
 #ifdef __cplusplus

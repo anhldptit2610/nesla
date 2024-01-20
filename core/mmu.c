@@ -5,10 +5,10 @@ void mem_io(struct nes *nes, uint16_t addr, uint8_t *val, mem_mode_t mode)
 {
     switch (mode) {
     case READ:
-        *val = nes->mem[addr];
+        *val = nes->cpu.mem[addr];
         break;
     case WRITE:
-        nes->mem[addr] = *val;
+        nes->cpu.mem[addr] = *val;
         break;
     default:
         break;
